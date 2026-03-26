@@ -21,6 +21,8 @@ import HourglassBottomIcon from '@mui/icons-material/HourglassBottom'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import AddIcon from '@mui/icons-material/Add'
 import FavoriteIcon from '@mui/icons-material/Favorite'
+import FullscreenIcon from '@mui/icons-material/Fullscreen'
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit'
 
 // ─── Types ────────────────────────────────────────────
 interface Message {
@@ -38,15 +40,9 @@ interface UploadedPdf {
   status: 'uploading' | 'processing' | 'ready' | 'error'
 }
 
-interface ChatSession {
-  pdfId: string
-  messages: Message[]
-}
-
-// ─── LocalStorage helpers ─────────────────────────────
 const STORAGE_KEYS = {
   PDFS: 'pdf-summariser-pdfs',
-  SESSIONS: 'pdf-summariser-sessions',
+  MESSAGES: 'pdf-summariser-messages',
   ACTIVE_PDF: 'pdf-summariser-active-pdf',
 }
 
@@ -91,13 +87,14 @@ export default function Dashboard() {
 
   // Persisted state
   const [pdfs, setPdfs] = useState<UploadedPdf[]>(() => loadFromStorage(STORAGE_KEYS.PDFS, []))
-  const [sessions, setSessions] = useState<ChatSession[]>(() => loadFromStorage(STORAGE_KEYS.SESSIONS, []))
+  const [messages, setMessages] = useState<Message[]>(() => loadFromStorage(STORAGE_KEYS.MESSAGES, []))
   const [activePdfId, setActivePdfId] = useState<string | null>(() => loadFromStorage(STORAGE_KEYS.ACTIVE_PDF, null))
 
   // Transient state
   const [dragActive, setDragActive] = useState(false)
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [isChatExpanded, setIsChatExpanded] = useState(false)
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -106,13 +103,11 @@ export default function Dashboard() {
 
   // ─── Persist to localStorage on changes ─────────────
   useEffect(() => { saveToStorage(STORAGE_KEYS.PDFS, pdfs) }, [pdfs])
-  useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, sessions) }, [sessions])
+  useEffect(() => { saveToStorage(STORAGE_KEYS.MESSAGES, messages) }, [messages])
   useEffect(() => { saveToStorage(STORAGE_KEYS.ACTIVE_PDF, activePdfId) }, [activePdfId])
 
   // ─── Derived state ──────────────────────────────────
   const activePdf = pdfs.find(p => p.id === activePdfId) ?? null
-  const activeSession = sessions.find(s => s.pdfId === activePdfId)
-  const messages = activeSession?.messages ?? []
 
   // ─── Auto-scroll on new messages ────────────────────
   useEffect(() => {
@@ -120,14 +115,8 @@ export default function Dashboard() {
   }, [messages, isTyping])
 
   // ─── Session helpers ────────────────────────────────
-  const addMessageToSession = useCallback((pdfId: string, msg: Message) => {
-    setSessions(prev => {
-      const existing = prev.find(s => s.pdfId === pdfId)
-      if (existing) {
-        return prev.map(s => s.pdfId === pdfId ? { ...s, messages: [...s.messages, msg] } : s)
-      }
-      return [...prev, { pdfId, messages: [msg] }]
-    })
+  const addMessage = useCallback((msg: Message) => {
+    setMessages(prev => [...prev, msg])
   }, [])
 
   // ─── Upload handler ─────────────────────────────────
@@ -150,35 +139,30 @@ export default function Dashboard() {
     const welcomeMsg: Message = {
       id: `welcome-${pdfId}`,
       role: 'assistant',
-      content: `I've received **"${file.name}"** and it's being processed. Once ready, you can ask me anything about this document — summaries, key points, specific questions, and more!`,
+      content: `I've received **"${file.name}"** and added it to the knowledge base! You can ask questions about all your uploaded documents.`,
       timestamp: new Date().toISOString(),
     }
-    addMessageToSession(pdfId, welcomeMsg)
+    addMessage(welcomeMsg)
 
     try {
       await uploadPdf(file)
-      setPdfs(prev => prev.map(p => p.id === pdfId ? { ...p, status: 'processing' } : p))
-
-      // After a short delay mark as ready (the worker processes in background)
-      setTimeout(() => {
-        setPdfs(prev => prev.map(p => p.id === pdfId ? { ...p, status: 'ready' } : p))
-        addMessageToSession(pdfId, {
-          id: `ready-${pdfId}`,
-          role: 'assistant',
-          content: `✅ **"${file.name}"** is now processed and ready! Go ahead and ask your questions.`,
-          timestamp: new Date().toISOString(),
-        })
-      }, 8000)
+      setPdfs(prev => prev.map(p => p.id === pdfId ? { ...p, status: 'ready' } : p))
+      addMessage({
+        id: `ready-${pdfId}`,
+        role: 'assistant',
+        content: `✅ **"${file.name}"** is now processed and ready! Go ahead and ask your questions.`,
+        timestamp: new Date().toISOString(),
+      })
     } catch {
       setPdfs(prev => prev.map(p => p.id === pdfId ? { ...p, status: 'error' } : p))
-      addMessageToSession(pdfId, {
+      addMessage({
         id: `error-${pdfId}`,
         role: 'assistant',
         content: `❌ Failed to upload **"${file.name}"**. Please try again.`,
         timestamp: new Date().toISOString(),
       })
     }
-  }, [addMessageToSession])
+  }, [addMessage])
 
   // ─── Drag & Drop ───────────────────────────────────
   const handleDrag = (e: React.DragEvent) => {
@@ -205,7 +189,6 @@ export default function Dashboard() {
   // ─── Remove PDF ─────────────────────────────────────
   const handleRemovePdf = (pdfId: string) => {
     setPdfs(prev => prev.filter(p => p.id !== pdfId))
-    setSessions(prev => prev.filter(s => s.pdfId !== pdfId))
     if (activePdfId === pdfId) {
       const remaining = pdfs.filter(p => p.id !== pdfId)
       setActivePdfId(remaining.length > 0 ? remaining[0].id : null)
@@ -214,7 +197,7 @@ export default function Dashboard() {
 
   // ─── Send Chat ─────────────────────────────────────
   const handleSend = async () => {
-    if (!inputValue.trim() || !activePdfId || isTyping) return
+    if (!inputValue.trim() || isTyping) return
 
     const userMsg: Message = {
       id: `user-${Date.now()}`,
@@ -222,7 +205,7 @@ export default function Dashboard() {
       content: inputValue.trim(),
       timestamp: new Date().toISOString(),
     }
-    addMessageToSession(activePdfId, userMsg)
+    addMessage(userMsg)
     const question = inputValue.trim()
     setInputValue('')
     setIsTyping(true)
@@ -235,9 +218,9 @@ export default function Dashboard() {
         content: answer,
         timestamp: new Date().toISOString(),
       }
-      addMessageToSession(activePdfId, aiMsg)
+      addMessage(aiMsg)
     } catch {
-      addMessageToSession(activePdfId, {
+      addMessage({
         id: `err-${Date.now()}`,
         role: 'assistant',
         content: '❌ Failed to get a response. Please check if the server is running and try again.',
@@ -359,7 +342,7 @@ export default function Dashboard() {
             maxHeight: { xs: pdfs.length > 0 ? '35vh' : '180px', md: '100%' },
             borderRight: { xs: 'none', md: '1px solid rgba(255,255,255,0.06)' },
             borderBottom: { xs: '1px solid rgba(255,255,255,0.06)', md: 'none' },
-            display: 'flex',
+            display: { xs: isChatExpanded ? 'none' : 'flex', md: 'flex' },
             flexDirection: 'column',
             bgcolor: 'rgba(10, 14, 26, 0.5)',
             flexShrink: 0,
@@ -559,7 +542,7 @@ export default function Dashboard() {
             )}
 
             {/* Quick Questions */}
-            {activePdf && (
+            {pdfs.length > 0 && (
               <Fade in>
                 <Box sx={{ px: 2, pb: 2, display: { xs: 'none', md: 'block' } }}>
                   <Divider sx={{ borderColor: 'rgba(255,255,255,0.06)', mb: 1.5 }} />
@@ -620,6 +603,7 @@ export default function Dashboard() {
             display: 'flex',
             flexDirection: 'column',
             minWidth: 0,
+            minHeight: 0,
           }}
         >
           {/* Chat Header */}
@@ -627,13 +611,16 @@ export default function Dashboard() {
             px: 3, py: 2,
             borderBottom: '1px solid rgba(255,255,255,0.06)',
             bgcolor: 'rgba(255,255,255,0.02)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
           }}>
-            <Stack direction="row" alignItems="center" spacing={1}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ flex: 1, minWidth: 0 }}>
               <ChatIcon sx={{ fontSize: 20, color: 'secondary.main' }} />
               <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                 AI Powered Chat
               </Typography>
-              {activePdf && (
+              {activePdf ? (
                 <Chip
                   label={activePdf.name}
                   size="small"
@@ -651,8 +638,36 @@ export default function Dashboard() {
                     },
                   }}
                 />
+              ) : (
+                <Chip
+                  label="All Documents"
+                  size="small"
+                  icon={<AutoAwesomeIcon sx={{ fontSize: 14 }} />}
+                  sx={{
+                    ml: 1,
+                    maxWidth: 300,
+                    bgcolor: 'rgba(0, 229, 255, 0.08)',
+                    color: '#00E5FF',
+                    border: '1px solid rgba(0, 229, 255, 0.2)',
+                    fontSize: '0.72rem',
+                    '& .MuiChip-icon': { color: '#00E5FF' },
+                  }}
+                />
               )}
             </Stack>
+            <IconButton 
+              size="small"
+              onClick={() => setIsChatExpanded(!isChatExpanded)}
+              sx={{ 
+                display: { xs: 'inline-flex', md: 'none' }, 
+                color: 'text.secondary',
+                ml: 1,
+                bgcolor: 'rgba(255,255,255,0.03)',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
+              }}
+            >
+              {isChatExpanded ? <FullscreenExitIcon fontSize="small" /> : <FullscreenIcon fontSize="small" />}
+            </IconButton>
           </Box>
 
           {/* Chat Messages Area */}
@@ -667,8 +682,8 @@ export default function Dashboard() {
               gap: 2.5,
             }}
           >
-            {/* Empty state — no pdf selected */}
-            {!activePdf && messages.length === 0 && (
+            {/* Empty state — no messages */}
+            {messages.length === 0 && (
               <Box sx={{
                 flex: 1, display: 'flex', flexDirection: 'column',
                 alignItems: 'center', justifyContent: 'center', textAlign: 'center',
@@ -831,11 +846,11 @@ export default function Dashboard() {
             <TextField
               inputRef={chatInputRef}
               fullWidth
-              placeholder={activePdf ? 'Ask anything about your PDF...' : 'Upload a PDF first to start chatting...'}
+              placeholder={pdfs.length > 0 ? 'Ask anything about your stored documents...' : 'Upload a PDF first to start chatting...'}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={!activePdf || isTyping}
+              disabled={pdfs.length === 0 || isTyping}
               multiline
               maxRows={3}
               variant="outlined"
@@ -845,18 +860,18 @@ export default function Dashboard() {
                     <InputAdornment position="end">
                       <IconButton
                         onClick={handleSend}
-                        disabled={!inputValue.trim() || !activePdf || isTyping}
+                        disabled={!inputValue.trim() || pdfs.length === 0 || isTyping}
                         sx={{
-                          bgcolor: inputValue.trim() && activePdf
+                          bgcolor: inputValue.trim() && pdfs.length > 0
                             ? 'primary.main'
                             : 'transparent',
-                          color: inputValue.trim() && activePdf
+                          color: inputValue.trim() && pdfs.length > 0
                             ? '#fff'
                             : 'text.secondary',
                           width: 36, height: 36,
                           transition: 'all 0.2s ease',
                           '&:hover': {
-                            bgcolor: inputValue.trim() && activePdf
+                            bgcolor: inputValue.trim() && pdfs.length > 0
                               ? 'primary.dark'
                               : 'rgba(255,255,255,0.05)',
                           },

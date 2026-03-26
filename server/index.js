@@ -2,16 +2,11 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import fs from "fs";
-import { Queue } from "bullmq";
+import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { QdrantVectorStore } from "@langchain/qdrant";
 
-const queue = new Queue("pdf-processing", {
-    connection: {
-        host: process.env.REDIS_HOST || "localhost",
-        port: Number(process.env.REDIS_PORT) || 6379,
-    },
-});
+
 const embeddings = new GoogleGenerativeAIEmbeddings({
     apiKey: process.env.GEMINI_API_KEY,
     model: "gemini-embedding-001",
@@ -24,6 +19,7 @@ const chatModel = new ChatGoogleGenerativeAI({
 
 const vectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, {
     url: process.env.QDRANT_URL || "http://localhost:6333",
+    apiKey: process.env.QDRANT_API_KEY,
     collectionName: "pdf-docs",
 });
 const retriever = vectorStore.asRetriever({
@@ -53,23 +49,35 @@ app.get('/', (req, res) => {
     return res.json({ message: "Hello World" });
 });
 
-app.post('/upload/pdf', upload.single("pdf"), (req, res) => {
+app.post('/upload/pdf', upload.single("pdf"), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
     }
     console.log("File uploaded:", req.file.originalname, "->", req.file.filename);
-    queue.add("process-pdf", {
-        filename: req.file.filename,
-        originalname: req.file.originalname,
-        size: req.file.size,
-        destination: req.file.destination
-    });
-    return res.json({
-        message: "PDF uploaded successfully",
-        filename: req.file.filename,
-        originalname: req.file.originalname,
-        size: req.file.size,
-    });
+
+    try {
+        const filePath = req.file.destination + "/" + req.file.filename;
+        const loader = new PDFLoader(filePath);
+        const allDocs = await loader.load();
+        const docs = allDocs.filter(doc => doc.pageContent && doc.pageContent.trim().length > 0);
+
+        // Add to Qdrant vector store
+        await vectorStore.addDocuments(docs);
+        console.log(`Successfully processed and embedded ${docs.length} pages.`);
+
+        // (Optional) Remove the local file since we sent it to cloud storage if needed 
+        // fs.unlinkSync(filePath);
+
+        return res.json({
+            message: "PDF processed successfully",
+            filename: req.file.filename,
+            originalname: req.file.originalname,
+            size: req.file.size,
+        });
+    } catch (error) {
+        console.error("Error processing PDF:", error);
+        return res.status(500).json({ message: "Error processing PDF", error: error.message });
+    }
 });
 app.get('/chat', async (req, res) => {
     const { query } = req.query;
