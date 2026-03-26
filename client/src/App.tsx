@@ -1,5 +1,5 @@
 import { ThemeProvider, CssBaseline } from '@mui/material'
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react'
+import { Show } from '@clerk/react'
 import theme from './theme'
 import LandingPage from './components/LandingPage'
 import Dashboard from './components/Dashboard'
