@@ -17,21 +17,21 @@ const worker = new Worker("pdf-processing", async (job) => {
     //     url: "http://localhost:6333"
     // })
     const embeddings = new GoogleGenerativeAIEmbeddings({
-        apiKey: "AIzaSyBJbWx_FOtlgjjrfm5NMhG3hgCx97xcuAM",
+        apiKey: process.env.GEMINI_API_KEY,
         model: "gemini-embedding-001",
     })
     let vectorStore;
     try {
         // Try connecting to existing collection
         vectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, {
-            url: "http://localhost:6333",
+            url: process.env.QDRANT_URL || "http://localhost:6333",
             collectionName: "pdf-docs",
         });
         await vectorStore.addDocuments(docs);
     } catch (e) {
         // Collection doesn't exist yet, create it
         vectorStore = await QdrantVectorStore.fromDocuments(docs, embeddings, {
-            url: "http://localhost:6333",
+            url: process.env.QDRANT_URL || "http://localhost:6333",
             collectionName: "pdf-docs",
         });
     }
@@ -39,8 +39,8 @@ const worker = new Worker("pdf-processing", async (job) => {
     return { result: "PDF processed successfully" };
 }, {
     connection: {
-        host: "localhost",
-        port: 6379,
+        host: process.env.REDIS_HOST || "localhost",
+        port: Number(process.env.REDIS_PORT) || 6379,
     },
 });
 

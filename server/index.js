@@ -8,22 +8,22 @@ import { QdrantVectorStore } from "@langchain/qdrant";
 
 const queue = new Queue("pdf-processing", {
     connection: {
-        host: "localhost",
-        port: 6379,
+        host: process.env.REDIS_HOST || "localhost",
+        port: Number(process.env.REDIS_PORT) || 6379,
     },
 });
 const embeddings = new GoogleGenerativeAIEmbeddings({
-    apiKey: "AIzaSyBJbWx_FOtlgjjrfm5NMhG3hgCx97xcuAM",
+    apiKey: process.env.GEMINI_API_KEY,
     model: "gemini-embedding-001",
 })
 
 const chatModel = new ChatGoogleGenerativeAI({
     model: "gemini-2.5-flash",
-    apiKey: "AIzaSyBJbWx_FOtlgjjrfm5NMhG3hgCx97xcuAM",
+    apiKey: process.env.GEMINI_API_KEY,
 });
 
 const vectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, {
-    url: "http://localhost:6333",
+    url: process.env.QDRANT_URL || "http://localhost:6333",
     collectionName: "pdf-docs",
 });
 const retriever = vectorStore.asRetriever({

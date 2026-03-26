@@ -7,10 +7,10 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "node --watch index.js",
-    "start": "node index.js",
-    "worker": "node --watch worker.js",
-    "worker:start": "node worker.js"
+    "dev": "node --env-file=.env --watch index.js",
+    "start": "node --env-file=.env index.js",
+    "worker": "node --env-file=.env --watch worker.js",
+    "worker:start": "node --env-file=.env worker.js"
   },
   "dependencies": {
     "@langchain/community": "^1.1.25",
