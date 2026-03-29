@@ -8,7 +8,6 @@ import {
 } from '@mui/material'
 import { UserButton, useUser, useClerk } from '@clerk/react'
 import LogoutIcon from '@mui/icons-material/Logout'
-import MenuIcon from '@mui/icons-material/Menu'
 import DescriptionIcon from '@mui/icons-material/Description'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
